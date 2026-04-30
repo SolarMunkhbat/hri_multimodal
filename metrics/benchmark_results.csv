@@ -1,0 +1,77 @@
+method,input,expected,got,correct,latency_ms
+Keyword Fallback,урагш яв,forward,forward,1,0.02
+Keyword Fallback,урагшаа,forward,forward,1,0.02
+Keyword Fallback,урагшаа явна уу,forward,forward,1,0.01
+Keyword Fallback,зогс,stop,stop,1,0.01
+Keyword Fallback,зогсоо,stop,stop,1,0.01
+Keyword Fallback,машиныг зогсоо,stop,stop,1,0.01
+Keyword Fallback,баруун тийш эргэ,right,right,1,0.01
+Keyword Fallback,баруун эрэг,right,right,1,0.01
+Keyword Fallback,зүүн тийш эргэ,left,left,1,0.01
+Keyword Fallback,зүүн эрэг,left,left,1,0.01
+Keyword Fallback,ухар,backward,backward,1,0.01
+Keyword Fallback,ухраа,backward,backward,1,0.01
+Keyword Fallback,арагш яв,backward,backward,1,0.01
+Keyword Fallback,хурдаа нэм,faster,faster,1,0.0
+Keyword Fallback,хурдан явна уу,faster,faster,1,0.01
+Keyword Fallback,удаан яв,slower,slower,1,0.01
+Keyword Fallback,аяар яв,slower,None,0,0.01
+Keyword Fallback,үргэлжлүүл,resume,resume,1,0.01
+Keyword Fallback,цааш яв,resume,None,0,0.01
+Keyword Fallback,эргэхээ боль,turn_stop,turn_stop,1,0.01
+Keyword Fallback,чигээрээ яваарай,turn_stop,None,0,0.01
+Keyword Fallback,явахаа боль,move_stop,move_stop,1,0.01
+Keyword Fallback,90 градус зүүн эргэ,turn_left_90,turn_left_90,1,0.01
+Keyword Fallback,ерэн градус баруун эргэ,turn_right_90,turn_right_90,1,0.0
+Keyword Fallback,баруун тийш 45 градус эргэ,turn_right_45,turn_right_45,1,0.0
+Keyword Fallback,нааш ир,forward,None,0,0.01
+Keyword Fallback,аяар урагшаа яв,forward,forward,1,0.01
+Keyword Fallback,удаан урагшаа яв,forward,slower,0,0.01
+Keyword Fallback,хурдан баруун эрэг,right,faster,0,0.01
+Keyword Fallback,бага зэрэг зүүн тийш,left,left,1,0.01
+Keyword Fallback,go forward,forward,forward,1,0.01
+Keyword Fallback,stop the robot,stop,stop,1,0.0
+Keyword Fallback,turn right,right,right,1,0.01
+Keyword Fallback,speed up,faster,faster,1,0.01
+Keyword Fallback,slow down,slower,slower,1,0.01
+Keyword Fallback,сайн байна уу,None,None,1,0.01
+Keyword Fallback,цаг ямар байна,None,None,1,0.01
+Keyword Fallback,тэгээрэй,None,None,1,0.01
+Ollama LLM (llama3.2),урагш яв,forward,forward,1,5941.65
+Ollama LLM (llama3.2),урагшаа,forward,forward,1,2179.46
+Ollama LLM (llama3.2),урагшаа явна уу,forward,forward,1,2166.08
+Ollama LLM (llama3.2),зогс,stop,stop,1,2239.75
+Ollama LLM (llama3.2),зогсоо,stop,stop,1,2400.53
+Ollama LLM (llama3.2),машиныг зогсоо,stop,backward,0,2252.13
+Ollama LLM (llama3.2),баруун тийш эргэ,right,right,1,2354.07
+Ollama LLM (llama3.2),баруун эрэг,right,right,1,2255.77
+Ollama LLM (llama3.2),зүүн тийш эргэ,left,left,1,2488.08
+Ollama LLM (llama3.2),зүүн эрэг,left,left,1,2322.84
+Ollama LLM (llama3.2),ухар,backward,backward,1,2301.76
+Ollama LLM (llama3.2),ухраа,backward,backward,1,2425.92
+Ollama LLM (llama3.2),арагш яв,backward,backward,1,2189.27
+Ollama LLM (llama3.2),хурдаа нэм,faster,faster,1,2409.56
+Ollama LLM (llama3.2),хурдан явна уу,faster,faster,1,2246.26
+Ollama LLM (llama3.2),удаан яв,slower,slower,1,2362.33
+Ollama LLM (llama3.2),аяар яв,slower,None,0,2244.68
+Ollama LLM (llama3.2),үргэлжлүүл,resume,resume,1,2325.64
+Ollama LLM (llama3.2),цааш яв,resume,resume,1,2288.08
+Ollama LLM (llama3.2),эргэхээ боль,turn_stop,turn_stop,1,2333.89
+Ollama LLM (llama3.2),чигээрээ яваарай,turn_stop,turn_stop,1,2264.92
+Ollama LLM (llama3.2),явахаа боль,move_stop,move_stop,1,2335.96
+Ollama LLM (llama3.2),90 градус зүүн эргэ,turn_left_90,turn_left_90,1,2315.11
+Ollama LLM (llama3.2),ерэн градус баруун эргэ,turn_right_90,turn_right_90,1,2334.4
+Ollama LLM (llama3.2),баруун тийш 45 градус эргэ,turn_right_45,turn_right_90,0,2337.78
+Ollama LLM (llama3.2),нааш ир,forward,None,0,2196.02
+Ollama LLM (llama3.2),аяар урагшаа яв,forward,forward,1,2400.14
+Ollama LLM (llama3.2),удаан урагшаа яв,forward,forward,1,2251.84
+Ollama LLM (llama3.2),хурдан баруун эрэг,right,right,1,2351.28
+Ollama LLM (llama3.2),бага зэрэг зүүн тийш,left,left,1,2232.87
+Ollama LLM (llama3.2),go forward,forward,forward,1,2341.58
+Ollama LLM (llama3.2),stop the robot,stop,stop,1,2252.67
+Ollama LLM (llama3.2),turn right,right,turn_right_90,0,2387.89
+Ollama LLM (llama3.2),speed up,faster,faster,1,2244.44
+Ollama LLM (llama3.2),slow down,slower,slower,1,2344.44
+Ollama LLM (llama3.2),сайн байна уу,None,None,1,2218.3
+Ollama LLM (llama3.2),цаг ямар байна,None,None,1,2335.48
+Ollama LLM (llama3.2),тэгээрэй,None,None,1,2419.23

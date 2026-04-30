@@ -3,233 +3,286 @@ import queue
 import tempfile
 import os
 import re
+import logging
+from typing import Optional, List
 
 import numpy as np
 import sounddevice as sd
 import soundfile as sf
-from gradio_client import Client, handle_file
+import requests
 
+logger = logging.getLogger(__name__)
+
+# ---------------------------------------------------------------------------
+# Chimege STT client
+# ---------------------------------------------------------------------------
+
+class ChimegeSTT:
+    """
+    Chimege.mn монгол дуу таних API.
+    POST https://api.chimege.com/v1.2/transcribe
+    Header: token: <api_token>
+    Body:   multipart/form-data  file=<wav>
+    """
+
+    def __init__(self, token: str, base_url: str = "https://api.chimege.com/v1.2"):
+        self.token = token
+        self.url = f"{base_url}/transcribe"
+
+    def transcribe(self, audio_path: str) -> Optional[str]:
+        """WAV файлыг Chimege API-д илгээж текст буцаана."""
+        try:
+            with open(audio_path, "rb") as f:
+                audio_data = f.read()
+
+            resp = requests.post(
+                self.url,
+                data=audio_data,
+                headers={
+                    "Content-Type": "application/octet-stream",
+                    "Token": self.token,
+                    "Punctuate": "false",
+                },
+                timeout=10.0,
+            )
+            resp.raise_for_status()
+
+            # Chimege хариу: plain text (JSON биш)
+            text = resp.content.decode("utf-8").strip()
+            logger.info(f"[CHIMEGE] → {text!r}")
+            return text if text else None
+
+        except requests.Timeout:
+            logger.warning("[CHIMEGE] Timeout")
+        except requests.HTTPError as e:
+            logger.error(f"[CHIMEGE] HTTP алдаа: {e.response.status_code} — {e.response.text}")
+        except Exception as e:
+            logger.error(f"[CHIMEGE] Алдаа: {e}")
+        return None
+
+
+# ---------------------------------------------------------------------------
+# Voice class
+# ---------------------------------------------------------------------------
 
 class Voice:
-    def __init__(self):
-        self.q = queue.Queue()
-        self.running = False
 
-        self.client = Client("https://stt.rookies.mn/")
+    DEFAULT_TOKEN = "ee4859755ab14aae166bd9e0bd8755612c4894b3a004a423a543df24f56d5dec"
 
-        self.sample_rate = 16000
-        self.channels = 1
-        self.blocksize = 800   # ~50ms at 16kHz
+    def __init__(
+        self,
+        chimege_token: str = DEFAULT_TOKEN,
+        sample_rate: int = 16000,
+        channels: int = 1,
+        blocksize: int = 800,
+        vad_threshold: float = 0.015,
+        silence_limit: float = 0.8,
+        min_voice_len: float = 0.3,
+        max_voice_len: float = 3.0,
+        cmd_queue_maxsize: int = 10,
+    ):
+        self._cmd_q: queue.Queue = queue.Queue(maxsize=cmd_queue_maxsize)
+        self._audio_q: queue.Queue = queue.Queue(maxsize=200)
+        self.running: bool = False
 
-        # voice activity detection
-        self.threshold = 0.015
-        self.silence_limit = 0.8
-        self.min_voice_len = 0.3
-        self.max_voice_len = 3.0
+        self.sample_rate = sample_rate
+        self.channels = channels
+        self.blocksize = blocksize
+        self.threshold = vad_threshold
+        self.silence_limit = silence_limit
+        self.min_voice_len = min_voice_len
+        self.max_voice_len = max_voice_len
 
-        self.audio_q = queue.Queue()
+        self._stt = ChimegeSTT(token=chimege_token)
 
-    def start(self):
+    # ------------------------------------------------------------------
+    # Public API
+    # ------------------------------------------------------------------
+
+    def start(self) -> None:
         self.running = True
-        threading.Thread(target=self.loop, daemon=True).start()
+        threading.Thread(target=self._vad_loop, daemon=True, name="vad-loop").start()
+        threading.Thread(target=self._transcribe_worker, daemon=True, name="transcribe-worker").start()
+        logger.info("[VOICE] threads started (Chimege STT)")
 
-    def stop(self):
+    def stop(self) -> None:
         self.running = False
 
-    def normalize(self, text):
-        if text is None:
+    def get(self) -> Optional[str]:
+        try:
+            return self._cmd_q.get_nowait()
+        except queue.Empty:
+            return None
+
+    # ------------------------------------------------------------------
+    # Text processing
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _normalize(text: str) -> str:
+        if not text:
             return ""
         text = str(text).lower().strip()
         text = re.sub(r"[^a-zA-Z0-9а-яөүё\s]", " ", text)
-        text = re.sub(r"\s+", " ", text).strip()
-        return text
+        return re.sub(r"\s+", " ", text).strip()
 
-    def has_any(self, text, keywords):
+    @staticmethod
+    def _has_any(text: str, keywords: List[str]) -> bool:
         return any(k in text for k in keywords)
 
-    def map_command(self, text):
-        t = self.normalize(text)
+    def _map_command(self, text: str) -> Optional[str]:
+        t = self._normalize(text)
         if not t:
             return None
 
-        # full stop / resume
-        if self.has_any(t, [
-            "зогс", "зогсоо", "зогсо", "stop", "halt", "pause"
-        ]):
+        if self._has_any(t, ["зогс", "зогсоо", "зогсо", "stop", "halt", "pause"]):
             return "stop"
-
-        if self.has_any(t, [
-            "үргэлжлүүл", "цааш", "resume", "go on"
-        ]):
+        if self._has_any(t, ["үргэлжлүүл", "цааш", "resume", "go on"]):
             return "resume"
-
-        # angular stop only
-        if self.has_any(t, [
-            "эргэхээ боль", "эргэлтээ зогсоо", "turn stop",
-            "straight ahead", "straight only", "чигээрээ"
-        ]):
+        if self._has_any(t, ["эргэхээ боль", "эргэлтээ зогсоо", "turn stop", "чигээрээ"]):
             return "turn_stop"
-
-        # linear stop only
-        if self.has_any(t, [
-            "явахаа боль", "хөдөлгөөнөө зогсоо", "move stop", "linear stop"
-        ]):
+        if self._has_any(t, ["явахаа боль", "хөдөлгөөнөө зогсоо", "move stop"]):
             return "move_stop"
 
-        # angle turns
-        if (("90" in t or "ерэн" in t) and
-            ("баруун" in t or "baruun" in t or "right" in t)):
+        if ("90" in t or "ерэн" in t) and self._has_any(t, ["баруун", "baruun", "right"]):
             return "turn_right_90"
-
-        if (("90" in t or "ерэн" in t) and
-            ("зүүн" in t or "zuun" in t or "left" in t)):
+        if ("90" in t or "ерэн" in t) and self._has_any(t, ["зүүн", "zuun", "left"]):
             return "turn_left_90"
-
-        if (("45" in t or "дөчин тав" in t) and
-            ("баруун" in t or "baruun" in t or "right" in t)):
+        if ("45" in t or "дөчин тав" in t) and self._has_any(t, ["баруун", "baruun", "right"]):
             return "turn_right_45"
-
-        if (("45" in t or "дөчин тав" in t) and
-            ("зүүн" in t or "zuun" in t or "left" in t)):
+        if ("45" in t or "дөчин тав" in t) and self._has_any(t, ["зүүн", "zuun", "left"]):
             return "turn_left_45"
 
-        # speed
-        if self.has_any(t, [
-            "хурдан", "түргэн", "хурдас", "speed up", "faster"
-        ]):
+        if self._has_any(t, ["хурдан", "түргэн", "хурдаа", "хурд нэм", "speed up", "faster"]):
             return "faster"
-
-        if self.has_any(t, [
-            "удаан", "зөөлөн", "саар", "slow", "slower"
-        ]):
+        if self._has_any(t, ["удаан", "зөөлөн", "саар", "slow", "slower"]):
             return "slower"
 
-        # linear
-        if self.has_any(t, [
-            "урагш", "урагшаа", "forward", "go forward"
-        ]):
+        if self._has_any(t, ["урагш", "урагшаа", "forward", "go forward"]):
             return "forward"
-
-        if self.has_any(t, [
-            "ухар", "ухраа", "арагш", "back", "backward"
-        ]):
+        if self._has_any(t, ["ухар", "ухраа", "арагш", "back", "backward"]):
             return "backward"
 
-        # angular
-        if self.has_any(t, [
-            "зүүн", "зүүн тийш", "zuun", "left"
-        ]):
+        if self._has_any(t, ["зүүн", "зүүн тийш", "zuun", "left"]):
             return "left"
-
-        if self.has_any(t, [
-            "баруун", "баруун тийш", "baruun", "right"
-        ]):
+        if self._has_any(t, ["баруун", "баруун тийш", "baruun", "right"]):
             return "right"
-
-        # optional mode commands
-        if self.has_any(t, ["gesture mode", "gesture", "gesture горим"]):
-            return "gesture"
-
-        if self.has_any(t, ["voice mode", "voice", "voice горим"]):
-            return "voice"
-
-        if self.has_any(t, ["multi", "multimodal", "хоёул", "хамт"]):
-            return "multi"
 
         return None
 
-    def save_temp(self, audio):
+    # ------------------------------------------------------------------
+    # Audio helpers
+    # ------------------------------------------------------------------
+
+    def _save_temp(self, audio: np.ndarray) -> str:
         tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".wav")
         path = tmp.name
         tmp.close()
         sf.write(path, audio, self.sample_rate)
         return path
 
-    def transcribe_and_queue(self, audio):
-        path = self.save_temp(audio)
-        try:
-            text = self.client.predict(
-                audio=handle_file(path),
-                backend="faster-whisper",
-                api_name="/transcribe"
-            )
-
-            cmd = self.map_command(text)
-
-            print("[VOICE RAW]:", text)
-            print("[VOICE NORM]:", self.normalize(text))
-            print("[VOICE CMD]:", cmd)
-
-            if cmd:
-                self.q.put(cmd)
-
-        except Exception as e:
-            print("Voice error:", e)
-
-        finally:
-            if os.path.exists(path):
-                os.remove(path)
-
-    def audio_callback(self, indata, frames, time_info, status):
+    def _audio_callback(self, indata, frames, time_info, status) -> None:
         if status:
-            print("Audio status:", status)
-        self.audio_q.put(indata.copy().flatten())
+            logger.warning(f"Audio status: {status}")
+        try:
+            self._audio_q.put_nowait(indata.copy().flatten())
+        except queue.Full:
+            pass
 
-    def loop(self):
-        voiced_frames = []
+    # ------------------------------------------------------------------
+    # Worker threads
+    # ------------------------------------------------------------------
+
+    def _transcribe_worker(self) -> None:
+        audio_buffer_q: queue.Queue = queue.Queue()
+        self._audio_ready_q = audio_buffer_q
+
+        while self.running:
+            try:
+                audio = audio_buffer_q.get(timeout=1.0)
+            except queue.Empty:
+                continue
+
+            path = self._save_temp(audio)
+            try:
+                text = self._stt.transcribe(path)
+                if not text:
+                    continue
+
+                cmd = self._map_command(text)
+                logger.info(f"[STT] {text!r} → {cmd!r}")
+
+                if cmd:
+                    try:
+                        self._cmd_q.put_nowait(cmd)
+                    except queue.Full:
+                        logger.warning("Command queue дүүрсэн.")
+
+            finally:
+                if os.path.exists(path):
+                    os.remove(path)
+
+    def _vad_loop(self) -> None:
+        voiced_frames: list = []
         speaking = False
         silence_time = 0.0
         voice_time = 0.0
-        block_duration = self.blocksize / self.sample_rate
+        block_dur = self.blocksize / self.sample_rate
+
+        import time
+        deadline = time.time() + 5.0
+        while not hasattr(self, "_audio_ready_q") and time.time() < deadline:
+            time.sleep(0.05)
+
+        if not hasattr(self, "_audio_ready_q"):
+            logger.error("Transcribe worker эхлээгүй.")
+            return
 
         with sd.InputStream(
             samplerate=self.sample_rate,
             channels=self.channels,
             dtype="float32",
             blocksize=self.blocksize,
-            callback=self.audio_callback
+            callback=self._audio_callback,
         ):
-            print("[VOICE] realtime listener started")
+            logger.info("[VOICE] VAD эхэллээ")
 
             while self.running:
-                chunk = self.audio_q.get()
-                rms = np.sqrt(np.mean(chunk ** 2))
+                try:
+                    chunk = self._audio_q.get(timeout=1.0)
+                except queue.Empty:
+                    continue
+
+                rms = float(np.sqrt(np.mean(chunk ** 2)))
 
                 if rms > self.threshold:
                     if not speaking:
-                        print("[VOICE] speech started")
                         speaking = True
                         voiced_frames = []
                         silence_time = 0.0
                         voice_time = 0.0
 
                     voiced_frames.append(chunk)
-                    voice_time += block_duration
+                    voice_time += block_dur
                     silence_time = 0.0
 
                     if voice_time >= self.max_voice_len:
-                        print("[VOICE] max voice length reached")
-                        audio = np.concatenate(voiced_frames)
+                        self._flush(voiced_frames)
                         speaking = False
-
-                        if len(audio) / self.sample_rate >= self.min_voice_len:
-                            self.transcribe_and_queue(audio)
-
                 else:
                     if speaking:
                         voiced_frames.append(chunk)
-                        silence_time += block_duration
-                        voice_time += block_duration
+                        silence_time += block_dur
+                        voice_time += block_dur
 
                         if silence_time >= self.silence_limit:
-                            print("[VOICE] speech ended")
-                            audio = np.concatenate(voiced_frames)
+                            self._flush(voiced_frames)
                             speaking = False
 
-                            if len(audio) / self.sample_rate >= self.min_voice_len:
-                                self.transcribe_and_queue(audio)
-
-    def get(self):
-        if not self.q.empty():
-            return self.q.get()
-        return None
+    def _flush(self, frames: list) -> None:
+        audio = np.concatenate(frames)
+        if len(audio) / self.sample_rate >= self.min_voice_len:
+            try:
+                self._audio_ready_q.put_nowait(audio)
+            except queue.Full:
+                logger.warning("Transcribe queue дүүрсэн.")

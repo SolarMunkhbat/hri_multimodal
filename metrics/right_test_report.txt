@@ -1,0 +1,9 @@
+              precision    recall  f1-score   support
+
+        idle     1.0000    1.0000    1.0000        30
+        left     1.0000    1.0000    1.0000        32
+       right     1.0000    1.0000    1.0000        30
+
+    accuracy                         1.0000        92
+   macro avg     1.0000    1.0000    1.0000        92
+weighted avg     1.0000    1.0000    1.0000        92

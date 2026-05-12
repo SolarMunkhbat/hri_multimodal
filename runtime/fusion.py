@@ -1,5 +1,10 @@
+import math
 import time
 from typing import Optional, Tuple
+
+# Тодорхой өнцгийн эргэлтэнд ашиглах angular velocity (rad/s).
+# Энэ утга роботын бодит хурдтай тохирох ёстой.
+PRECISE_TURN_SPEED = 0.8
 
 
 class FusionState:
@@ -21,12 +26,14 @@ class FusionState:
         max_speed_scale: float = 2.0,
         min_speed_scale: float = 0.2,
         speed_step: float = 0.1,
+        precise_turn_speed: float = PRECISE_TURN_SPEED,
     ):
         self.speed_scale = speed_scale
         self.turn_scale = turn_scale
         self.max_speed_scale = max_speed_scale
         self.min_speed_scale = min_speed_scale
         self.speed_step = speed_step
+        self.precise_turn_speed = precise_turn_speed
 
         self.voice_linear: Optional[str] = None    # "forward" | "backward" | None
         self.voice_angular: Optional[str] = None   # "left" | "right" | None
@@ -90,20 +97,20 @@ class FusionState:
             self.temp_turn_direction = 0.0
 
         elif cmd == "turn_left_90":
-            self.temp_turn_direction = self.turn_scale
-            self.temp_turn_until = now + 1.0
+            self.temp_turn_direction = self.precise_turn_speed
+            self.temp_turn_until = now + (math.pi / 2) / self.precise_turn_speed
 
         elif cmd == "turn_right_90":
-            self.temp_turn_direction = -self.turn_scale
-            self.temp_turn_until = now + 1.0
+            self.temp_turn_direction = -self.precise_turn_speed
+            self.temp_turn_until = now + (math.pi / 2) / self.precise_turn_speed
 
         elif cmd == "turn_left_45":
-            self.temp_turn_direction = self.turn_scale
-            self.temp_turn_until = now + 0.5
+            self.temp_turn_direction = self.precise_turn_speed
+            self.temp_turn_until = now + (math.pi / 4) / self.precise_turn_speed
 
         elif cmd == "turn_right_45":
-            self.temp_turn_direction = -self.turn_scale
-            self.temp_turn_until = now + 0.5
+            self.temp_turn_direction = -self.precise_turn_speed
+            self.temp_turn_until = now + (math.pi / 4) / self.precise_turn_speed
 
 
 def fuse(
@@ -147,9 +154,11 @@ def fuse(
         lin = -(speed if speed > 0.05 else 0.3)
 
     # --- Angular: temp precise turns (highest priority) ---
+    # speed_scale хэрэглэхгүй — өнцөг нарийвчлалтай байхын тулд хурд тогтмол
     if now < state.temp_turn_until:
-        ang = state.temp_turn_direction
-    elif state.voice_angular == "left":
+        return lin * state.speed_scale, state.temp_turn_direction
+
+    if state.voice_angular == "left":
         ang = speed * state.turn_scale
     elif state.voice_angular == "right":
         ang = -speed * state.turn_scale

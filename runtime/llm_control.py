@@ -35,40 +35,57 @@ _SYSTEM_PROMPT = """You are a robot command parser for a Mongolian human-robot i
 Map the user's utterance to EXACTLY ONE of these commands:
   stop, resume, forward, backward, left, right,
   faster, slower, move_stop, turn_stop,
-  turn_left_90, turn_right_90, turn_left_45, turn_right_45
+  turn_left_90, turn_right_90, turn_left_45, turn_right_45,
+  nav_cancel,
+  nav:person, nav:chair, nav:dining table, nav:bottle, nav:cup,
+  nav:car, nav:dog, nav:cat, nav:book, nav:cell phone, nav:backpack,
+  nav:car_green, nav:car_blue, nav:car_red, nav:car_yellow,
+  nav_behind:car_green, nav_behind:car_blue, nav_behind:car_red, nav_behind:car_yellow,
+  nav_circle:car_green, nav_circle:car_blue, nav_circle:car_red, nav_circle:car_yellow
 
 Rules:
 - Return ONLY valid JSON: {"command": "..."} or {"command": null}
-- EXACTLY ONE command — never two words like "slower forward"
+- EXACTLY ONE command — never two words
 - No explanation, no markdown, no extra text
-- If utterance has multiple actions, pick the MOST IMPORTANT one (direction > speed)
-- "удаан урагшаа яв" → forward (direction wins over speed)
-- "хурдан баруун эрэг" → right (direction wins over speed)
-- "баруун" / "баруун тийш" / "баруун эрэг" = right (NEVER backward)
-- "зүүн" / "зүүн тийш" / "зүүн эрэг" = left
-- "урагш" / "урагшаа" / "урагшаа яв" = forward
-- "ухар" / "ухраа" / "арагш" = backward
-- "зогс" / "зогсоо" / "stop" = stop
-- "үргэлжлүүл" / "цааш яв" / "resume" = resume
-- "хурдаа нэм" / "хурдан" / "faster" = faster (alone, no direction)
-- "удаан" / "саар" / "slower" = slower (alone, no direction)
-- "чигээрээ" / "чигээрээ яваарай" = turn_stop (NOT stop)
-- "эргэхээ боль" / "ирэхээ боль" = turn_stop
-- "явахаа боль" = move_stop
-- "ерэн градус баруун" / "90 баруун" = turn_right_90
-- "ерэн градус зүүн" / "90 зүүн" = turn_left_90
-- "45 баруун" = turn_right_45
-- "45 зүүн" = turn_left_45
+- Navigation commands: use when user says "go to X", "find X", "X руу яв", "X-г ол"
+- "хүн руу яв" / "тэр хүнийг ол" / "go to the person" = nav:person
+- "сандал руу яв" / "find the chair" = nav:chair
+- "ширээний дэргэд яв" / "go to the table" = nav:dining table
+- "навигаци зогсоо" / "дагахаа боль" / "cancel navigation" = nav_cancel
+- Colored car navigation:
+  "ногоон машин руу яв" / "ногоон машин дээрээ оч" / "go to green car" = nav:car_green
+  "цэнхэр машин руу яв" / "go to blue car" = nav:car_blue
+  "ногоон машины ард зогс" / "ногоон машины ард очоод зогс" / "go behind green car" = nav_behind:car_green
+  "цэнхэр машины ард зогс" = nav_behind:car_blue
+  "ногоон машиныг тойр" / "ногоон машинаа тойроод эргэлд" / "circle green car" = nav_circle:car_green
+  "цэнхэр машиныг тойр" / "circle blue car" = nav_circle:car_blue
+- Direction rules (manual mode):
+  "баруун" / "баруун тийш" = right (NEVER backward)
+  "зүүн" / "зүүн тийш" = left
+  "урагш" / "урагшаа" = forward
+  "ухар" / "арагш" = backward
+  "зогс" / "stop" = stop
+  "үргэлжлүүл" / "resume" = resume
+  "хурдан" / "faster" = faster (alone)
+  "удаан" / "slower" = slower (alone)
+  "чигээрээ" = turn_stop
+  "явахаа боль" = move_stop
+  "90 баруун" = turn_right_90, "90 зүүн" = turn_left_90
+  "45 баруун" = turn_right_45, "45 зүүн" = turn_left_45
 
 Examples:
-  "баруун эрэг"              → {"command": "right"}
-  "удаан урагшаа яв"         → {"command": "forward"}
-  "хурдан зүүн эрэг"         → {"command": "left"}
-  "зогс"                     → {"command": "stop"}
-  "чигээрээ яваарай"         → {"command": "turn_stop"}
-  "ерэн градус баруун эрэг"  → {"command": "turn_right_90"}
-  "сайн байна уу"            → {"command": null}
-  "тэгээрэй"                 → {"command": null}
+  "хүн руу яв"                         → {"command": "nav:person"}
+  "тэр сандал руу яв"                  → {"command": "nav:chair"}
+  "ширээг ол"                          → {"command": "nav:dining table"}
+  "навигаци зогсоо"                    → {"command": "nav_cancel"}
+  "баруун эрэг"                        → {"command": "right"}
+  "зогс"                               → {"command": "stop"}
+  "ерэн градус баруун эрэг"            → {"command": "turn_right_90"}
+  "ногоон машин дээрээ оч"             → {"command": "nav:car_green"}
+  "ногоон машины ард зогс"             → {"command": "nav_behind:car_green"}
+  "ногоон машинаа тойроод эргэлд"      → {"command": "nav_circle:car_green"}
+  "цэнхэр машин руу яв"               → {"command": "nav:car_blue"}
+  "сайн байна уу"                      → {"command": null}
 """
 
 
@@ -200,6 +217,47 @@ class _KeywordFallback:
             return "left"
         if any(k in t for k in ["баруун", "right"]):
             return "right"
+
+        # Navigation fallback
+        if any(k in t for k in ["навигаци зогсоо", "дагахаа боль", "cancel navigation"]):
+            return "nav_cancel"
+
+        # Colored-car maneuver commands (check before generic nav triggers)
+        _COLORS = [
+            (["ногоон", "green"],  "green"),
+            (["цэнхэр", "blue"],   "blue"),
+            (["улаан", "red"],     "red"),
+            (["шар", "yellow"],    "yellow"),
+        ]
+        _is_car = any(k in t for k in ["машин", "car"])
+        if _is_car:
+            for color_kws, color in _COLORS:
+                if any(k in t for k in color_kws):
+                    target = f"car_{color}"
+                    if any(k in t for k in ["тойр", "эргэлд", "circle"]):
+                        return f"nav_circle:{target}"
+                    if any(k in t for k in ["ард", "behind", "behind"]):
+                        return f"nav_behind:{target}"
+                    return f"nav:{target}"
+
+        _nav_triggers = ["руу яв", "лүү яв", "ол", "дээрээ оч", "go to", "find", "navigate to"]
+        if any(k in t for k in _nav_triggers):
+            _targets = [
+                (["хүн", "person"],       "nav:person"),
+                (["сандал", "chair"],     "nav:chair"),
+                (["ширээ", "table"],      "nav:dining table"),
+                (["лонх", "bottle"],      "nav:bottle"),
+                (["аяга", "cup"],         "nav:cup"),
+                (["машин", "car"],        "nav:car"),
+                (["нохой", "dog"],        "nav:dog"),
+                (["муур", "cat"],         "nav:cat"),
+                (["ном", "book"],         "nav:book"),
+                (["утас", "phone"],       "nav:cell phone"),
+                (["уут", "bag"],          "nav:backpack"),
+            ]
+            for kws, cmd in _targets:
+                if any(k in t for k in kws):
+                    return cmd
         return None
 
 

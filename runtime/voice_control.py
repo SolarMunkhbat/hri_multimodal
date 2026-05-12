@@ -67,11 +67,9 @@ class ChimegeSTT:
 
 class Voice:
 
-    DEFAULT_TOKEN = "ee4859755ab14aae166bd9e0bd8755612c4894b3a004a423a543df24f56d5dec"
-
     def __init__(
         self,
-        chimege_token: str = DEFAULT_TOKEN,
+        chimege_token: str = "",
         sample_rate: int = 16000,
         channels: int = 1,
         blocksize: int = 800,
@@ -81,8 +79,13 @@ class Voice:
         max_voice_len: float = 3.0,
         cmd_queue_maxsize: int = 10,
     ):
+        if not chimege_token:
+            raise ValueError("CHIMEGE_TOKEN тохируулаагүй. Орчны хувьсагчаар дамжуулна уу.")
+
         self._cmd_q: queue.Queue = queue.Queue(maxsize=cmd_queue_maxsize)
         self._audio_q: queue.Queue = queue.Queue(maxsize=200)
+        self._audio_ready_q: queue.Queue = queue.Queue()
+        self._worker_ready = threading.Event()
         self.running: bool = False
 
         self.sample_rate = sample_rate
@@ -168,6 +171,34 @@ class Voice:
         if self._has_any(t, ["баруун", "баруун тийш", "baruun", "right"]):
             return "right"
 
+        # --- Навигаци командууд — "X руу яв / X-г ол" ---
+        # Навигацийг цуцлах
+        if self._has_any(t, ["навигаци зогсоо", "дагахаа боль", "cancel navigation",
+                              "stop navigation", "гараараа удирдана"]):
+            return "nav_cancel"
+
+        # Target объект руу явах
+        _nav_targets = [
+            (["хүн", "person", "хүний дэргэд", "хүнийг ол"],       "nav:person"),
+            (["сандал", "chair", "сандал руу"],                      "nav:chair"),
+            (["ширээ", "table", "dining table", "ширээний дэргэд"],  "nav:dining table"),
+            (["лонх", "bottle"],                                      "nav:bottle"),
+            (["аяга", "cup"],                                         "nav:cup"),
+            (["машин", "car"],                                        "nav:car"),
+            (["нохой", "dog"],                                        "nav:dog"),
+            (["муур", "cat"],                                         "nav:cat"),
+            (["ном", "book"],                                         "nav:book"),
+            (["утас", "phone", "cell phone"],                         "nav:cell phone"),
+            (["уут", "bag", "backpack"],                              "nav:backpack"),
+        ]
+        # "X руу яв" / "X-г ол" / "X хаана байна" гэсэн хэлбэрийг шалгана
+        _nav_triggers = ["руу яв", "лүү яв", "ол", "хайж ол", "хаана байна",
+                         "go to", "find", "navigate to"]
+        if self._has_any(t, _nav_triggers):
+            for keywords, cmd in _nav_targets:
+                if self._has_any(t, keywords):
+                    return cmd
+
         return None
 
     # ------------------------------------------------------------------
@@ -194,12 +225,11 @@ class Voice:
     # ------------------------------------------------------------------
 
     def _transcribe_worker(self) -> None:
-        audio_buffer_q: queue.Queue = queue.Queue()
-        self._audio_ready_q = audio_buffer_q
+        self._worker_ready.set()
 
         while self.running:
             try:
-                audio = audio_buffer_q.get(timeout=1.0)
+                audio = self._audio_ready_q.get(timeout=1.0)
             except queue.Empty:
                 continue
 
@@ -229,12 +259,7 @@ class Voice:
         voice_time = 0.0
         block_dur = self.blocksize / self.sample_rate
 
-        import time
-        deadline = time.time() + 5.0
-        while not hasattr(self, "_audio_ready_q") and time.time() < deadline:
-            time.sleep(0.05)
-
-        if not hasattr(self, "_audio_ready_q"):
+        if not self._worker_ready.wait(timeout=5.0):
             logger.error("Transcribe worker эхлээгүй.")
             return
 

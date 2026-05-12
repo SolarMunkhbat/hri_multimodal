@@ -2,7 +2,7 @@ import numpy as np
 from typing import Tuple, Optional
 import mediapipe as mp
 
-SEQ_LEN = 40
+SEQ_LEN = 20
 FEATURE_SIZE = 63  # 21 landmarks * 3 (x, y, z)
 
 
@@ -23,27 +23,41 @@ def extract_hand_features(hand_landmarks) -> np.ndarray:
 def extract_left_and_right(results) -> Tuple[np.ndarray, np.ndarray, Optional[object], Optional[object]]:
     """
     MediaPipe results-с зүүн/баруун гарын feature болон landmark буцаана.
-    Гар олдохгүй бол zero array буцаана.
+
+    Нэг гар байвал MediaPipe-ийн label-г ашиглана.
+    Хоёр гар байвал wrist x-байрлалаар ялгана — frame flip хийсний дараа
+    зүүн гар нь image-ийн зүүн талд (x < 0.5) байдаг тул энэ нь MediaPipe-ийн
+    label-ийн хооронд frame-ийн handedness swap-с илүү найдвартай.
     """
     left_features = np.zeros(FEATURE_SIZE, dtype=np.float32)
     right_features = np.zeros(FEATURE_SIZE, dtype=np.float32)
-
     left_landmarks = None
     right_landmarks = None
 
     if not results.multi_hand_landmarks:
         return left_features, right_features, left_landmarks, right_landmarks
 
-    for hand_landmarks, handedness in zip(results.multi_hand_landmarks, results.multi_handedness):
-        label = handedness.classification[0].label
-        feat = extract_hand_features(hand_landmarks)
+    detected = results.multi_hand_landmarks
 
+    if len(detected) == 1:
+        # Single hand: MediaPipe label is reliable
+        lm = detected[0]
+        label = results.multi_handedness[0].classification[0].label
+        feat = extract_hand_features(lm)
         if label == "Left":
-            left_features = feat
-            left_landmarks = hand_landmarks
-        elif label == "Right":
-            right_features = feat
-            right_landmarks = hand_landmarks
+            left_features, left_landmarks = feat, lm
+        else:
+            right_features, right_landmarks = feat, lm
+    else:
+        # Two hands: sort by wrist x-position.
+        # After cv2.flip(frame,1) the user's left hand is on the left side of
+        # the image (smaller x) regardless of MediaPipe's handedness label,
+        # which can swap between frames when both hands are close together.
+        by_x = sorted(detected, key=lambda lm: lm.landmark[0].x)
+        left_landmarks  = by_x[0]   # leftmost  = user's left hand
+        right_landmarks = by_x[-1]  # rightmost = user's right hand
+        left_features  = extract_hand_features(left_landmarks)
+        right_features = extract_hand_features(right_landmarks)
 
     return left_features, right_features, left_landmarks, right_landmarks
 

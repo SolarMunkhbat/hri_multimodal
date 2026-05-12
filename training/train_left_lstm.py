@@ -16,7 +16,7 @@ MODEL_DIR = os.path.join(BASE_DIR, "models")
 METRIC_DIR = os.path.join(BASE_DIR, "metrics")
 
 CLASSES = ["forward", "backward", "stop", "idle"]
-SEQ_LEN = 40
+SEQ_LEN = 20
 FEATURE_SIZE = 63
 
 os.makedirs(MODEL_DIR, exist_ok=True)
@@ -39,7 +39,9 @@ def load_dataset():
             path = os.path.join(class_dir, file_name)
             seq = np.load(path)
 
-            if seq.shape != (SEQ_LEN, FEATURE_SIZE):
+            if seq.shape == (40, FEATURE_SIZE):
+                seq = seq[::2]  # subsample 40→20 frames
+            elif seq.shape != (SEQ_LEN, FEATURE_SIZE):
                 print(f"[WARN] skipped {path}, shape={seq.shape}")
                 continue
 
@@ -133,14 +135,16 @@ def main():
     y_encoded = encoder.fit_transform(y)
     y_cat = to_categorical(y_encoded)
 
-    X_train, X_val, y_train, y_val, y_train_idx, y_val_idx = train_test_split(
-        X,
-        y_cat,
-        y_encoded,
-        test_size=0.2,
-        random_state=42,
-        stratify=y_encoded
+    # Эхлээд test 15% тусгаарлана, дараа val 15% гаргана (train 70%)
+    X_tmp, X_test, y_tmp, y_test, y_tmp_idx, y_test_idx = train_test_split(
+        X, y_cat, y_encoded, test_size=0.15, random_state=42, stratify=y_encoded
     )
+    X_train, X_val, y_train, y_val, y_train_idx, y_val_idx = train_test_split(
+        X_tmp, y_tmp, y_tmp_idx,
+        test_size=0.176,   # 0.176 × 0.85 ≈ 0.15 → нийт 15% val
+        random_state=42, stratify=y_tmp_idx
+    )
+    print(f"Train:{len(X_train)}  Val:{len(X_val)}  Test:{len(X_test)}")
 
     model = build_model(len(encoder.classes_))
 
@@ -169,27 +173,34 @@ def main():
 
     np.save(os.path.join(MODEL_DIR, "left_label_map.npy"), encoder.classes_)
 
-    val_pred_prob = model.predict(X_val, verbose=0)
-    val_pred_idx = np.argmax(val_pred_prob, axis=1)
+    # Validation тайлан
+    val_pred_idx = np.argmax(model.predict(X_val, verbose=0), axis=1)
+    val_report = classification_report(y_val_idx, val_pred_idx,
+                                       target_names=encoder.classes_, digits=4)
+    val_cm = confusion_matrix(y_val_idx, val_pred_idx)
 
-    report = classification_report(
-        y_val_idx,
-        val_pred_idx,
-        target_names=encoder.classes_,
-        digits=4
-    )
-    cm = confusion_matrix(y_val_idx, val_pred_idx)
+    # Test тайлан — загвар сонгоход ашиглаагүй тусдаа өгөгдөл
+    test_pred_idx = np.argmax(model.predict(X_test, verbose=0), axis=1)
+    test_report = classification_report(y_test_idx, test_pred_idx,
+                                        target_names=encoder.classes_, digits=4)
+    test_cm = confusion_matrix(y_test_idx, test_pred_idx)
 
-    print("\n===== CLASSIFICATION REPORT =====")
-    print(report)
+    print("\n===== VALIDATION REPORT =====")
+    print(val_report)
+    print("===== TEST REPORT =====")
+    print(test_report)
 
-    with open(os.path.join(METRIC_DIR, "left_classification_report.txt"), "w", encoding="utf-8") as f:
-        f.write(report)
+    with open(os.path.join(METRIC_DIR, "left_val_report.txt"), "w", encoding="utf-8") as f:
+        f.write(val_report)
+    with open(os.path.join(METRIC_DIR, "left_test_report.txt"), "w", encoding="utf-8") as f:
+        f.write(test_report)
 
-    np.save(os.path.join(METRIC_DIR, "left_confusion_matrix.npy"), cm)
+    np.save(os.path.join(METRIC_DIR, "left_val_cm.npy"), val_cm)
+    np.save(os.path.join(METRIC_DIR, "left_test_cm.npy"), test_cm)
 
     save_history_plots(history, "left")
-    save_confusion_matrix(cm, encoder.classes_, "left")
+    save_confusion_matrix(val_cm,  encoder.classes_, "left_val")
+    save_confusion_matrix(test_cm, encoder.classes_, "left_test")
 
     print("[INFO] Left model saved")
     print("[INFO] Labels:", encoder.classes_)
